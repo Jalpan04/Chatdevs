@@ -6,6 +6,8 @@ Features:
 - Leader creates room, can start the chat; chat ends when time limit hits
 - Friends join by entering room code and a unique username
 - Simple terminal/CLI visual style in the browser
+- User-Specific Colors: Each user gets a unique, persistent chat color.
+- "Copy Code" Button: Easily copy the room code to the clipboard.
 */
 
 const express = require('express');
@@ -28,7 +30,7 @@ code: {
   leaderName: String,
   maxUsers: Number,
   timeLimitMin: Number,
-  users: { socketId: username }, // Maps socket IDs to usernames
+  users: { socketId: { username: String, color: String } }, // Maps socket IDs to user objects
   started: Boolean,
   timer: TimeoutID | null,
   endTimestamp: Number | null,
@@ -44,6 +46,40 @@ function makeCode(len = 6) {
     }
     return s;
 }
+
+/** A predefined list of high-contrast colors for user distinction. */
+const HIGH_CONTRAST_COLORS = [
+    'hsl(200, 100%, 65%)', // Vivid Sky Blue
+    'hsl(15, 100%, 60%)',  // Deep Orange
+    'hsl(280, 90%, 70%)',  // Vibrant Purple
+    'hsl(50, 100%, 65%)',  // Bright Yellow
+    'hsl(340, 90%, 65%)',  // Hot Pink
+    'hsl(0, 100%, 65%)',   // Bright Red
+    'hsl(210, 100%, 75%)', // Electric Blue
+    'hsl(35, 100%, 70%)'   // Amber
+];
+
+
+/**
+ * Assigns a unique, high-contrast color to a new user from a predefined palette.
+ * @param {object} currentUsers - The users object from the room state.
+ * @returns {string} An HSL color string.
+ */
+function assignColor(currentUsers) {
+    const usedColors = new Set(Object.values(currentUsers).map(u => u.color));
+
+    // Find the first palette color that is not currently in use.
+    for (const color of HIGH_CONTRAST_COLORS) {
+        if (!usedColors.has(color)) {
+            return color;
+        }
+    }
+
+    // If all palette colors are used, cycle through them based on the number of users.
+    const userCount = Object.keys(currentUsers).length;
+    return HIGH_CONTRAST_COLORS[userCount % HIGH_CONTRAST_COLORS.length];
+}
+
 
 // Serve the client-side HTML file from the constant below
 app.get('/', (req, res) => {
@@ -81,8 +117,9 @@ io.on('connection', (socket) => {
             endTimestamp: null,
         };
 
-        // Add the leader as the first user
-        room.users[socket.id] = username;
+        // Add the leader as the first user with a high-contrast color
+        const color = assignColor(room.users);
+        room.users[socket.id] = { username, color };
         rooms.set(code, room);
         socket.join(code);
 
@@ -101,9 +138,10 @@ io.on('connection', (socket) => {
         const room = rooms.get(code);
         if (room.started) return cb({ ok: false, error: 'Chat has already started.' });
         if (Object.keys(room.users).length >= room.maxUsers) return cb({ ok: false, error: 'Room is full.' });
-        if (Object.values(room.users).includes(username)) return cb({ ok: false, error: 'Username is already taken.' });
+        if (Object.values(room.users).some(u => u.username === username)) return cb({ ok: false, error: 'Username is already taken.' });
 
-        room.users[socket.id] = username;
+        const color = assignColor(room.users);
+        room.users[socket.id] = { username, color };
         socket.join(code);
 
         io.to(code).emit('systemMessage', `${username} joined the room.`);
@@ -146,15 +184,15 @@ io.on('connection', (socket) => {
     socket.on('sendMessage', ({ code, message }, cb) => {
         if (!rooms.has(code)) return cb?.({ ok: false, error: 'Room not found.' });
         const room = rooms.get(code);
-        const username = room.users[socket.id];
+        const user = room.users[socket.id];
 
-        if (!username) return cb?.({ ok: false, error: 'You are not in this room.' });
+        if (!user) return cb?.({ ok: false, error: 'You are not in this room.' });
         if (!room.started) return cb?.({ ok: false, error: 'Chat has not started yet.' });
 
         message = String(message || '').trim();
         if (message === '') return cb?.({ ok: false, error: 'Message cannot be empty.' });
 
-        io.to(code).emit('message', { username, message, ts: Date.now() });
+        io.to(code).emit('message', { username: user.username, color: user.color, message, ts: Date.now() });
         cb?.({ ok: true });
     });
 
@@ -179,10 +217,11 @@ io.on('connection', (socket) => {
 function handleUserLeaving(socket, code) {
     if (!rooms.has(code)) return;
     const room = rooms.get(code);
-    const username = room.users[socket.id];
+    const user = room.users[socket.id];
 
-    if (!username) return;
+    if (!user) return;
 
+    const username = user.username;
     delete room.users[socket.id];
     socket.leave(code);
 
@@ -198,7 +237,7 @@ function handleUserLeaving(socket, code) {
     if (socket.id === room.leaderSocketId) {
         const newLeaderSocketId = Object.keys(room.users)[0];
         room.leaderSocketId = newLeaderSocketId;
-        room.leaderName = room.users[newLeaderSocketId];
+        room.leaderName = room.users[newLeaderSocketId].username;
         io.to(code).emit('systemMessage', `${room.leaderName} is the new leader.`);
     }
 
@@ -215,7 +254,7 @@ function broadcastRoomState(code) {
         leaderName: room.leaderName,
         maxUsers: room.maxUsers,
         timeLimitMin: room.timeLimitMin,
-        users: Object.values(room.users),
+        users: Object.values(room.users).map(u => ({ username: u.username, color: u.color })),
         started: room.started,
         endTimestamp: room.endTimestamp,
     });
@@ -395,6 +434,7 @@ const indexHtml = `<!DOCTYPE html>
       padding: 8px 12px;
       color: #0a0;
       min-height: 40px;
+      word-wrap: break-word;
     }
 
     .room-code {
@@ -407,6 +447,7 @@ const indexHtml = `<!DOCTYPE html>
       padding: 8px 12px;
       min-height: 60px;
       color: #0a0;
+      white-space: pre-wrap;
     }
 
     .chat-log {
@@ -452,18 +493,20 @@ const indexHtml = `<!DOCTYPE html>
 
     .log-entry {
       margin-bottom: 8px;
+      word-wrap: break-word;
     }
 
     .log-system {
       color: #0a0;
     }
 
-    .log-message {
-      color: #0f0;
+    .log-message .username {
+      font-weight: bold;
     }
 
     .log-time {
       color: #0a0;
+      margin-right: 8px;
     }
 
     .hidden {
@@ -514,6 +557,7 @@ const indexHtml = `<!DOCTYPE html>
         <div class="section">
           <div class="section-title">&gt; ROOM STATUS</div>
           <div class="info-box" id="roomInfo">Not connected</div>
+          <button id="btnCopyCode" class="hidden" style="width: 100%; margin-top: 8px;">COPY CODE</button>
         </div>
 
         <div class="section">
@@ -562,20 +606,30 @@ const indexHtml = `<!DOCTYPE html>
       el.scrollTop = el.scrollHeight;
     }
 
+    function escapeHtml(unsafe) {
+        return unsafe
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
     // --- Room Entry ---
     function handleRoomEntry(code, isLeader = false) {
       currentRoom = code;
       $('joinCode').value = code;
       $('btnLeave').classList.remove('hidden');
+      $('btnCopyCode').classList.remove('hidden');
       
       ['username', 'maxUsers', 'timeLimit', 'joinCode', 'btnCreate', 'btnJoin']
         .forEach(id => $(id).disabled = true);
 
       if (isLeader) {
-        $('roomInfo').textContent = \`Room [\${code}] - YOU ARE LEADER\`;
+        $('roomInfo').innerHTML = \`Room <span class="room-code">\${code}</span> - YOU ARE LEADER\`;
         $('btnStart').classList.remove('hidden');
       } else {
-        $('roomInfo').textContent = \`Room [\${code}] - CONNECTED\`;
+        $('roomInfo').innerHTML = \`Room <span class="room-code">\${code}</span> - CONNECTED\`;
       }
     }
 
@@ -625,6 +679,23 @@ const indexHtml = `<!DOCTYPE html>
       resetToLobby('You left the room');
     });
 
+    $('btnCopyCode').addEventListener('click', () => {
+        if (!currentRoom) return;
+        navigator.clipboard.writeText(currentRoom).then(() => {
+            const btn = $('btnCopyCode');
+            const originalText = btn.textContent;
+            btn.textContent = 'COPIED!';
+            btn.disabled = true;
+            setTimeout(() => {
+                btn.textContent = originalText;
+                btn.disabled = false;
+            }, 1500);
+        }).catch(err => {
+            console.error('Failed to copy code: ', err);
+            log('> ERROR: Could not copy code to clipboard.');
+        });
+    });
+
     function sendMessage() {
       const text = $('message').value;
       if (!text.trim() || !currentRoom) return;
@@ -651,9 +722,9 @@ const indexHtml = `<!DOCTYPE html>
     socket.on('roomState', (state) => {
       if (!currentRoom || currentRoom !== state.code) return;
 
-      $('usersList').textContent = 
+      $('usersList').innerHTML = 
         \`\${state.users.length}/\${state.maxUsers} connected\\n\` + 
-        state.users.map(u => \`- \${u}\`).join('\\n');
+        state.users.map(u => \`<span style="color: \${u.color};">- \${escapeHtml(u.username)}\</span>\`).join('\\n');
       
       const amILeader = state.leaderName === myName;
 
@@ -670,18 +741,27 @@ const indexHtml = `<!DOCTYPE html>
 
     socket.on('systemMessage', (text) => log(\`> SYSTEM: \${text}\`, 'system'));
 
-    socket.on('message', ({ username, message, ts }) => {
-      const time = new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      log(\`[\${time}] \${username}: \${message}\`, 'message');
+    socket.on('message', ({ username, color, message, ts }) => {
+        const el = $('log');
+        const entry = document.createElement('div');
+        entry.className = 'log-entry log-message';
+
+        const time = new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+        entry.innerHTML = 
+            \`<span class="log-time">[\${time}]</span> \` +
+            \`<span class="username" style="color: \${color};">\${escapeHtml(username)}:</span> \` +
+            \`<span>\${escapeHtml(message)}</span>\`;
+        
+        el.appendChild(entry);
+        el.scrollTop = el.scrollHeight;
     });
-
-
 
     socket.on('timeUpdate', (remainingSeconds) => {
       const m = Math.floor(remainingSeconds / 60);
       const s = remainingSeconds % 60;
-      $('roomInfo').textContent = 
-        \`Room [\${currentRoom}] - Time: \${m}:\${String(s).padStart(2, '0')}\`;
+      $('roomInfo').innerHTML = 
+        \`Room <span class="room-code">\${currentRoom}</span> - Time: \${m}:\${String(s).padStart(2, '0')}\`;
     });
 
     socket.on('timeUp', () => {
@@ -706,9 +786,11 @@ const indexHtml = `<!DOCTYPE html>
       $('btnSend').disabled = true;
       $('btnStart').classList.add('hidden');
       $('btnLeave').classList.add('hidden');
+      $('btnCopyCode').classList.add('hidden');
       $('roomInfo').textContent = 'Not connected';
       $('usersList').textContent = 'No users';
     }
   </script>
 </body>
-</html>`;
+</html>
+`;
