@@ -285,7 +285,7 @@ const indexHtml = `<!DOCTYPE html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>CLI Group Chat</title>
+  <title>Cardamom Group Chat 🌿</title>
   <link 
     rel="stylesheet" 
     href="https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css"
@@ -794,3 +794,4 @@ const indexHtml = `<!DOCTYPE html>
 </body>
 </html>
 `;
+
