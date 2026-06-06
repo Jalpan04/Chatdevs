@@ -1,5 +1,7 @@
 # Cardamom Group Chat
 
+![GitHub top language](https://img.shields.io/github/languages/top/Jalpan04/Chatdevs) ![GitHub repo size](https://img.shields.io/github/repo-size/Jalpan04/Chatdevs) [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+
 A simple, single-file, terminal-themed group chat application built with Node.js, Express, and Socket.io. Create temporary, time-limited chat rooms for quick conversations with friends.
 
 ![A screenshot of the Cardamom chat interface, showing the CLI theme, a list of users, and the main chat log.](https://github.com/user-attachments/assets/ea8a0706-6eb0-4bdb-a3a0-0d9855081c55)
