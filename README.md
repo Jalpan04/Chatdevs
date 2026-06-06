@@ -88,4 +88,4 @@ You must have Node.js (which includes npm) installed on your system.
 
 ## License
 
-This project is licensed under the MIT License. See the LICENSE file for details.
+This project is licensed under the Apache-2.0 License - see the [LICENSE](LICENSE) file for details.
